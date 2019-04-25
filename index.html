@@ -89,8 +89,11 @@
 		<div class="panel">
 			<div>
 				<h3>Don't park here</h3>
-				<div class="messagebox" v-if="!sendingData && !dataReceived">
-					Pick a spot on the map.
+				<div class="messagebox inprogress" v-if="!connected">
+					Connecting to SignalR server, please wait...
+				</div>
+				<div class="messagebox" v-if="!sendingData && !dataReceived && connected">
+					Connected! Pick a spot on the map.
 				</div>
 				<div class="messagebox inprogress" v-if="sendingData">
 					Checking your spot, please wait...
@@ -115,7 +118,8 @@
 			sendingData: false,
 			dataReceived: false,
 			success: false,
-			result: null
+			result: null,
+			connected: false
 		  };
 
 		const app = new Vue({
@@ -149,7 +153,10 @@
 
 			console.log('connecting...');
 			connection.start()
-				.then(() => console.log('connected!'))
+				.then(() => {
+					console.log('connected!');
+					data.connected = true;
+					})
 				.catch(console.error);
 
 		}).catch(alert);
