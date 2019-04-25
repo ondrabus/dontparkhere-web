@@ -1,0 +1,205 @@
+<!doctype html>
+<html>
+<head>
+	<title>Don't park here</title>
+	<script src="https://api.mapy.cz/loader.js"></script>
+	<script>
+		Loader.load();
+		
+		const S4 = function () {
+			return (((1+Math.random())*0x10000)|0).toString(16).substring(1); 
+		}
+		
+		const newGuid = function() {	 
+			// then to call it, plus stitch in '4' in the third group
+			guid = (S4() + S4() + "-" + S4() + "-4" + S4().substr(0,3) + "-" + S4() + "-" + S4() + S4() + S4()).toLowerCase();
+			return guid;
+		}
+		
+		window.apiBaseUrl = 'https://dph.azurewebsites.net';
+		window.instanceId = newGuid();
+	</script>
+	<link href="https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css">
+	<link href="https://fonts.googleapis.com/css?family=Lato" rel="stylesheet">
+	<link href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
+
+	<style>
+		html, body, #app { width: 100%; height: 100%; margin: auto; }
+		
+		body
+		{
+			font-family: 'Lato', sans-serif;
+		}
+		
+		.panel
+		{
+			width: 25%;
+			height: 100%;
+			position: fixed;
+			top: 0;
+			left: 0;
+			z-index: 100;
+			background: #fff; /*url("./bg.jpg") 50% 100%;*/
+			padding: 10px;
+			display: flex;
+			align-items: center;
+		}
+		.panel > div
+		{
+			width: 100%;
+			height: 50%;
+			padding: 10%;
+		}
+		h3
+		{
+			font-size: 200%;
+			font-weight: 100;
+			margin-bottom: 0;
+		}
+		.messagebox.inprogress { animation: blinker 2s linear infinite; }
+		@keyframes blinker { 50% { opacity: 0.25; } }
+
+		
+		#map
+		{
+			width: 75%;
+			float: right;
+			height: 100%;
+		}
+		.messagebox
+		{
+			width: 100%;
+			height: 50px;
+			margin: 10px 0;
+		}
+		.success
+		{
+			color: green;
+		}
+		.error
+		{
+			color: red;
+		}
+	</style>
+</head>
+
+<body>
+	<div id="app">
+		<div id="map"></div>
+		<div class="panel">
+			<div>
+				<h3>Don't park here</h3>
+				<div class="messagebox" v-if="!sendingData && !dataReceived">
+					Pick a spot on the map.
+				</div>
+				<div class="messagebox inprogress" v-if="sendingData">
+					Checking your spot, please wait...
+				</div>
+				<div :class="success ? 'messagebox success' : 'messagebox error'" v-if="dataReceived">
+					<i class="fa fa-check fa-2x" v-if="success"></i>
+					<i class="fa fa-hand-paper-o fa-2x" v-if="!success"></i><br />
+					<p v-html="result"></p>
+				</div>
+			</div>
+		</div>
+	</div>	
+	
+	<script src="https://cdn.jsdelivr.net/npm/vue@2.5.17/dist/vue.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@aspnet/signalr@1.0.3/dist/browser/signalr.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/axios@0.18.0/dist/axios.min.js"></script>
+	
+	
+	
+	<script type="text/javascript">
+		let data = {
+			sendingData: false,
+			dataReceived: false,
+			success: false,
+			result: null
+		  };
+
+		const app = new Vue({
+		  el: '#app',
+		  data: data
+		});
+		
+		function getConnectionInfo() {
+		  return axios.post(`${apiBaseUrl}/api/InputSignalRNegotiate`, null, getAxiosConfig())
+			.then(resp => resp.data);
+		}
+
+		getConnectionInfo().then(info => {
+			// make compatible with old and new SignalRConnectionInfo
+			info.accessToken = info.accessToken || info.accessKey;
+			info.url = info.url || info.endpoint;
+
+			data.ready = true;
+			const options = {
+				accessTokenFactory: () => info.accessToken
+			};
+			console.log(info.url);
+
+			const connection = new signalR.HubConnectionBuilder()
+				.withUrl(info.url, options)
+				.configureLogging(signalR.LogLevel.Information)
+				.build();
+
+			connection.on('newMessage', processResponse);
+			connection.onclose(() => console.log('disconnected'));
+
+			console.log('connecting...');
+			connection.start()
+				.then(() => console.log('connected!'))
+				.catch(console.error);
+
+		}).catch(alert);
+
+		function sendCoordinates (lat, lon) {
+			data.sendingData = true;
+			data.dataReceived = false;
+
+			axios.post(`${apiBaseUrl}/api/InputSignalR`, {
+				instanceId: instanceId,
+				lat: lat,
+				lon: lon
+			}, getAxiosConfig()).then(resp => resp.data);
+		}
+
+		function getAxiosConfig() {
+		  const config = {
+			headers: {
+				"instanceId": instanceId
+			}
+		  };
+		  return config;
+		}
+
+		function processResponse(message) {
+			data.sendingData = false;
+			data.dataReceived = true;
+
+			console.log(message);
+
+			data.success = message.outputCode == 200;
+			data.result = message.outputMessage.split("\n").join("<br>");
+		}
+		
+		var center = SMap.Coords.fromWGS84(16.6081525, 49.1951214);
+		var map = new SMap(JAK.gel("map"), center, 13);
+		map.addDefaultLayer(SMap.DEF_BASE).enable();
+		map.addDefaultControls();
+		
+		map.addControl(new SMap.Control.Sync());
+		map.addDefaultLayer(SMap.DEF_BASE).enable();
+		var mouse = new SMap.Control.Mouse(SMap.MOUSE_PAN | SMap.MOUSE_WHEEL | SMap.MOUSE_ZOOM);
+		map.addControl(mouse);
+
+		function click(e, elm) {
+			var coords = SMap.Coords.fromEvent(e.data.event, map);
+			sendCoordinates(coords.y, coords.x);
+		}
+		map.getSignals().addListener(window, "map-click", click);
+	</script>
+  
+</body>
+</html>
