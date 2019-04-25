@@ -61,11 +61,12 @@
 		@keyframes blinker { 50% { opacity: 0.25; } }
 
 		
-		#map
+		.mapContainer
 		{
 			width: 100%;
 			float: right;
 			height: 60%;
+			position: relative;
 			
 		}
 		.messagebox
@@ -83,6 +84,12 @@
 			color: red;
 		}
 		
+		#map {
+			position: relative;
+			width: 100%;
+			height: 100%;
+		}
+		
 		@media screen and (min-width: 64em){
 			.panel {
 				width: 25%;
@@ -95,7 +102,7 @@
 				height: 50%;
 			}
 		
-			#map {
+			.mapContainer {
 				width: 75%;
 				height: 100%;
 			}
@@ -105,7 +112,9 @@
 
 <body>
 	<div id="app">
-		<div id="map"></div>
+		<div class="mapContainer">
+			<div id="map"></div>
+		</div>
 		<div class="panel">
 			<div>
 				<h3>Don't park here</h3>
@@ -213,9 +222,6 @@
 		
 		var center = SMap.Coords.fromWGS84(16.6081525, 49.1951214);
 		var map = new SMap(JAK.gel("map"), center, 13);
-		map.addDefaultLayer(SMap.DEF_BASE).enable();
-		map.addDefaultControls();
-		
 		map.addControl(new SMap.Control.Sync());
 		map.addDefaultLayer(SMap.DEF_BASE).enable();
 		var mouse = new SMap.Control.Mouse(SMap.MOUSE_PAN | SMap.MOUSE_WHEEL | SMap.MOUSE_ZOOM);
