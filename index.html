@@ -156,7 +156,9 @@
 			result: null,
 			connected: false,
 			position: [],
-			instanceId: window.instanceId
+			instanceId: window.instanceId,
+			map: null,
+			markerLayer: null
 		};
 
 		const app = new Vue({
@@ -197,6 +199,12 @@
 			},
 			position: function() {
 				console.log('position changed');
+				
+				let center = SMap.Coords.fromWGS84(data.position[1], data.position[0]);
+				
+				data.markerLayer.removeAll();
+				data.markerLayer.addMarker(new SMap.Marker(center), "Car", {});
+				data.map.setCenterZoom(center, 15, true);
 				
 				// send request
 				data.sendingData = true;
@@ -240,20 +248,26 @@
 		  }
 		});
 		
-		
+				
+				
+		// add map
 		
 		var center = SMap.Coords.fromWGS84(16.6081525, 49.1951214);
-		var map = new SMap(JAK.gel("map"), center, 13);
-		map.addControl(new SMap.Control.Sync());
-		map.addDefaultLayer(SMap.DEF_BASE).enable();
+		data.map = new SMap(JAK.gel("map"), center, 13);
+		data.map.addControl(new SMap.Control.Sync());
+		data.map.addDefaultLayer(SMap.DEF_BASE).enable();
+		
 		var mouse = new SMap.Control.Mouse(SMap.MOUSE_PAN | SMap.MOUSE_WHEEL | SMap.MOUSE_ZOOM);
-		map.addControl(mouse);
-
-		function click(e, elm) {
-			var coords = SMap.Coords.fromEvent(e.data.event, map);
-			data.position = [coords.y, coords.x];
-		}
-		map.getSignals().addListener(window, "map-click", click);
+		data.map.addControl(mouse);
+		
+		data.markerLayer = new SMap.Layer.Marker();
+		data.map.addLayer(data.markerLayer);
+		data.markerLayer.enable();
+		
+		data.map.getSignals().addListener(window, "map-click", function(e, elm) {
+				var coords = SMap.Coords.fromEvent(e.data.event, data.map);
+				data.position = [coords.y, coords.x];
+			});
 	</script>
   
 </body>
