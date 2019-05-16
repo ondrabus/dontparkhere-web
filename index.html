@@ -143,82 +143,104 @@
 	
 	
 	<script type="text/javascript">
+		const requestConfig = {
+					headers: {
+						"instanceId": window.instanceId
+					}
+				};
+	
 		let data = {
 			sendingData: false,
 			dataReceived: false,
 			success: false,
 			result: null,
-			connected: false
-		  };
+			connected: false,
+			position: [],
+			instanceId: window.instanceId
+		};
 
 		const app = new Vue({
 		  el: '#app',
-		  data: data
+		  data: data,
+		  methods: {
+		  
+			getPosition: function(){
+			  if (navigator.geolocation) {
+				navigator.geolocation.getCurrentPosition(this.setPosition);
+			  }
+			},
+			
+			setPosition: function(position){
+				data.position = [position.coords.latitude, position.coords.longitude];
+				console.log(position);
+			},
+			
+			receiveMessage: function(message){
+				data.sendingData = false;
+				data.dataReceived = true;
+
+				data.success = message.outputCode == 200;
+				data.result = message.outputMessage.split("\n").join("<br>");
+			},
+			
+			connectionClosed: function(){
+				data.connected = false;
+			}
+		  },
+		  
+		  watch: {
+			connected: function(val) {
+				if (val)
+				{
+					this.getPosition();
+				}
+			},
+			position: function() {
+				console.log('position changed');
+				
+				// send request
+				data.sendingData = true;
+				data.dataReceived = false;
+
+				axios.post(`${apiBaseUrl}/api/InputSignalR`, {
+					instanceId: data.instanceId,
+					lat: data.position[0],
+					lon: data.position[1]
+				}, requestConfig)
+				.then(resp => resp.data);
+			}
+		  },
+		  
+		  created: function(){
+			axios.post(`${apiBaseUrl}/api/InputSignalRNegotiate`, null, requestConfig)
+				.then(resp => resp.data)
+				.then(info => {
+					// make compatible with old and new SignalRConnectionInfo
+					info.accessToken = info.accessToken || info.accessKey;
+					info.url = info.url || info.endpoint;
+
+					const options = {
+						accessTokenFactory: () => info.accessToken
+					};
+					
+					const connection = new signalR.HubConnectionBuilder()
+						.withUrl(info.url, options)
+						.configureLogging(signalR.LogLevel.Information)
+						.build();
+
+					connection.on('newMessage', this.receiveMessage);
+					connection.onclose(this.connectionClosed);
+
+					connection.start()
+						.then(() => {
+							data.connected = true;
+							})
+						.catch(console.error);
+				}).catch(alert);
+		  }
 		});
 		
-		function getConnectionInfo() {
-		  return axios.post(`${apiBaseUrl}/api/InputSignalRNegotiate`, null, getAxiosConfig())
-			.then(resp => resp.data);
-		}
-
-		getConnectionInfo().then(info => {
-			// make compatible with old and new SignalRConnectionInfo
-			info.accessToken = info.accessToken || info.accessKey;
-			info.url = info.url || info.endpoint;
-
-			data.ready = true;
-			const options = {
-				accessTokenFactory: () => info.accessToken
-			};
-			console.log(info.url);
-
-			const connection = new signalR.HubConnectionBuilder()
-				.withUrl(info.url, options)
-				.configureLogging(signalR.LogLevel.Information)
-				.build();
-
-			connection.on('newMessage', processResponse);
-			connection.onclose(() => console.log('disconnected'));
-
-			console.log('connecting...');
-			connection.start()
-				.then(() => {
-					console.log('connected!');
-					data.connected = true;
-					})
-				.catch(console.error);
-
-		}).catch(alert);
-
-		function sendCoordinates (lat, lon) {
-			data.sendingData = true;
-			data.dataReceived = false;
-
-			axios.post(`${apiBaseUrl}/api/InputSignalR`, {
-				instanceId: instanceId,
-				lat: lat,
-				lon: lon
-			}, getAxiosConfig()).then(resp => resp.data);
-		}
-
-		function getAxiosConfig() {
-		  const config = {
-			headers: {
-				"instanceId": instanceId
-			}
-		  };
-		  return config;
-		}
-
-		function processResponse(message) {
-			data.sendingData = false;
-			data.dataReceived = true;
-
-			console.log(message);
-
-			data.success = message.outputCode == 200;
-			data.result = message.outputMessage.split("\n").join("<br>");
-		}
+		
 		
 		var center = SMap.Coords.fromWGS84(16.6081525, 49.1951214);
 		var map = new SMap(JAK.gel("map"), center, 13);
@@ -229,7 +251,7 @@
 
 		function click(e, elm) {
 			var coords = SMap.Coords.fromEvent(e.data.event, map);
-			sendCoordinates(coords.y, coords.x);
+			data.position = [coords.y, coords.x];
 		}
 		map.getSignals().addListener(window, "map-click", click);
 	</script>
