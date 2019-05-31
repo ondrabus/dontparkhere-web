@@ -16,7 +16,7 @@
 			return guid;
 		}
 		
-		window.apiBaseUrl = 'https://dph.azurewebsites.net';
+		window.apiBaseUrl = 'http://dph.azurewebsites.net';
 		window.instanceId = newGuid();
 	</script>
 	<link href="https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css">
@@ -31,25 +31,25 @@
 			font-family: 'Lato', sans-serif;
 		}
 		
+		#app
+		{
+			flex-direction: column;
+			display: flex;
+		}
+		
+		.mapContainer
+		{
+			flex-basis: 0;
+			flex-grow: 3;
+		}
 		.panel
 		{
-			width: 100%;
-			height: 40%;
-			position: fixed;
-			top: 60%;
-			left: 0;
-			z-index: 100;
 			background: #fff; /*url("./bg.jpg") 50% 100%;*/
 			padding: 10px;
 			display: flex;
 			align-items: center;
-
-		}
-		.panel > div
-		{
-			width: 50%;
-			height: 100%;
-			padding: 10%;
+			flex-basis: 0;
+			flex-grow: 2;
 		}
 		h3
 		{
@@ -61,18 +61,9 @@
 		@keyframes blinker { 50% { opacity: 0.25; } }
 
 		
-		.mapContainer
-		{
-			width: 100%;
-			float: right;
-			height: 60%;
-			position: relative;
-			
-		}
 		.messagebox
 		{
 			width: 100%;
-			height: 50px;
 			margin: 10px 0;
 		}
 		.success
@@ -89,22 +80,26 @@
 			width: 100%;
 			height: 100%;
 		}
+		#map img.meter
+		{
+			width: 32px;
+		}
 		
 		@media screen and (min-width: 64em){
+			#app {
+				flex-direction: row-reverse;
+			}
 			.panel {
-				width: 25%;
-				height: 100%;
-				top: 0;
-				left: 0;
+				flex-basis: 0;
+				flex-grow: 1;
 			}
 			.panel > div {
 				width: 100%;
-				height: 50%;
 			}
 		
 			.mapContainer {
-				width: 75%;
-				height: 100%;
+				flex-basis: 0;
+				flex-grow: 3;
 			}
 		}
 	</style>
@@ -132,6 +127,21 @@
 					<i class="fa fa-hand-paper-o fa-2x" v-if="!success"></i><br />
 					<p v-html="result"></p>
 				</div>
+				<div v-if="dataReceived && restrictions.length > 0">
+					<h4 v-on:click="restrictionsOpen = !restrictionsOpen">
+						<i class="fa fa-plus-square-o" v-if="!restrictionsOpen"></i>
+						<i class="fa fa-minus-square-o" v-else></i>
+						All restrictions
+					</h4>
+					<div v-if="restrictionsOpen">
+						<div v-for="restriction in restrictions">
+							<div v-for="duration in restriction.durations">
+								<strong>{{Math.floor(duration.timeStart/60)}}:{{("0" + duration.timeStart % 60).slice(-2)}} - {{Math.floor(duration.timeEnd/60)}}:{{("0" + duration.timeEnd % 60).slice(-2)}} ({{duration.days.map(d => d.substring(0,3)).join(", ")}})</strong><br />
+							</div>
+							<p v-html="restriction.description"></p>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 	</div>	
@@ -153,12 +163,15 @@
 			sendingData: false,
 			dataReceived: false,
 			success: false,
-			result: null,
+			result: "",
 			connected: false,
 			position: [],
 			instanceId: window.instanceId,
 			map: null,
-			markerLayer: null
+			markerLayer: null,
+			restrictions: [],
+			parkingMachines: [],
+			restrictionsOpen: false
 		};
 
 		const app = new Vue({
@@ -174,19 +187,54 @@
 			
 			setPosition: function(position){
 				data.position = [position.coords.latitude, position.coords.longitude];
-				console.log(position);
 			},
 			
 			receiveMessage: function(message){
 				data.sendingData = false;
 				data.dataReceived = true;
-
-				data.success = message.outputCode == 200;
-				data.result = message.outputMessage.split("\n").join("<br>");
+				
+				console.log(message);
+				
+				let residentialParking = [message];//.filter(m => m.module === "BrnoResidentialParking");
+				if (residentialParking.length == 0 || message == null)
+				{
+					data.success = true;
+					data.result = "Selected spot is outside of restricted parking zones.";
+				}
+				else
+				{
+					let applicableRestrictions = residentialParking[0].data.applicableRestrictions;
+					let otherRestrictions = residentialParking[0].data.restrictions;
+					let parkingMachines = residentialParking[0].data.machines;
+					
+					if (applicableRestrictions.length == 0)
+					{
+						data.success = true;
+						data.result = "Selected spot is inside restricted parking zone " + residentialParking[0].data.area + ". However, at this moment there are no restrictions and you car park here freely.";
+					}
+					else
+					{
+						data.success = false;
+						data.result = "Selected spot is inside restricted parking zone " + residentialParking[0].data.area + ".<br />";
+						
+						for (let i = 0; i < applicableRestrictions.length; i++)
+						{
+							data.result += applicableRestrictions[i].description + "<br />";
+						}
+						
+						data.parkingMachines = parkingMachines;
+					}
+					
+					data.restrictions = otherRestrictions;
+				}
 			},
 			
 			connectionClosed: function(){
 				data.connected = false;
+			},
+			
+			removePointers: function(){
+				this.map.getControls().filter(c => "_alwaysShow" in c).forEach(c => this.map.removeControl(c));
 			}
 		  },
 		  
@@ -198,24 +246,46 @@
 				}
 			},
 			position: function() {
+				this.restrictions = [];
+				this.parkingMachines = [];
+				this.result = "";
+			
 				console.log('position changed');
 				
 				let center = SMap.Coords.fromWGS84(data.position[1], data.position[0]);
 				
-				data.markerLayer.removeAll();
-				data.markerLayer.addMarker(new SMap.Marker(center), "Car", {});
-				data.map.setCenterZoom(center, 15, true);
+				this.removePointers();
+				this.markerLayer.removeAll();
+				this.markerLayer.addMarker(new SMap.Marker(center), "Car", {});
+				this.map.setCenterZoom(center, 18, true);
 				
 				// send request
-				data.sendingData = true;
-				data.dataReceived = false;
+				this.sendingData = true;
+				this.dataReceived = false;
 
 				axios.post(`${apiBaseUrl}/api/InputSignalR`, {
-					instanceId: data.instanceId,
-					lat: data.position[0],
-					lon: data.position[1]
+					instanceId: this.instanceId,
+					lat: this.position[0],
+					lon: this.position[1]
 				}, requestConfig)
 				.then(resp => resp.data);
+			},
+			
+			parkingMachines: function(val) {
+				
+				this.removePointers();
+				
+				for (let i = 0; i < val.length; i++)
+				{
+					let image = JAK.mel("img", { className: "meter", src: "./meter.png" });
+					this.markerLayer.addMarker(new SMap.Marker(SMap.Coords.fromWGS84(val[i].machine.coords[1], val[i].machine.coords[0]), val[i].machine.name, {url: image}));
+					
+					let pointer = new SMap.Control.Pointer({"showDistance": true});
+					this.map.addControl(pointer);
+					pointer.setCoords(SMap.Coords.fromWGS84(val[i].machine.coords[1], val[i].machine.coords[0]));
+				}
+				
+				this.markerLayer.redraw(false);
 			}
 		  },
 		  
